@@ -1,0 +1,206 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Streaming Recommendation Engine</title>
+<style>
+  * { box-sizing: border-box; }
+  body { font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif; margin: 0; background: #f4f5f7; color: #1e293b; }
+  header { background: #0f172a; color: #fff; padding: 20px 28px; display: flex; align-items: center; gap: 14px; flex-wrap: wrap; }
+  header h1 { margin: 0; font-size: 22px; }
+  header p { margin: 2px 0 0; color: #94a3b8; font-size: 13px; }
+  .badge { margin-left: auto; padding: 6px 14px; border-radius: 999px; font-weight: 600; font-size: 13px; background: #22c55e; color: #052e16; }
+  .badge.paused { background: #f59e0b; color: #451a03; }
+  main { max-width: 1200px; margin: 0 auto; padding: 20px; }
+  .metrics { display: grid; grid-template-columns: repeat(4, 1fr); gap: 14px; margin-bottom: 18px; }
+  .metric { background: #fff; border-radius: 12px; padding: 16px; box-shadow: 0 1px 3px rgba(0,0,0,.08); }
+  .metric .label { font-size: 12px; color: #64748b; text-transform: uppercase; letter-spacing: .05em; }
+  .metric .value { font-size: 26px; font-weight: 700; margin-top: 4px; }
+  .panel { background: #fff; border-radius: 12px; padding: 18px; box-shadow: 0 1px 3px rgba(0,0,0,.08); margin-bottom: 18px; }
+  .panel h2 { margin: 0 0 12px; font-size: 17px; }
+  .controls { display: flex; gap: 10px; flex-wrap: wrap; align-items: end; }
+  .controls label { font-size: 12px; color: #64748b; display: block; margin-bottom: 4px; }
+  button, select, input { font-size: 14px; padding: 8px 12px; border-radius: 8px; border: 1px solid #cbd5e1; background: #fff; }
+  button { background: #0f172a; color: #fff; border: none; cursor: pointer; }
+  button.secondary { background: #e2e8f0; color: #0f172a; }
+  .grid { display: grid; grid-template-columns: 1fr 1fr; gap: 18px; }
+  .user-card { border: 1px solid #e2e8f0; border-radius: 10px; padding: 12px 14px; margin-bottom: 12px; }
+  .user-card h3 { margin: 0 0 8px; font-size: 15px; }
+  .cold { display: inline-block; font-size: 11px; background: #dbeafe; color: #1e40af; border-radius: 999px; padding: 2px 8px; margin-left: 6px; vertical-align: middle; }
+  .rec { display: flex; justify-content: space-between; gap: 10px; padding: 7px 0; border-top: 1px solid #f1f5f9; }
+  .rec:first-of-type { border-top: none; }
+  .rec .name { font-weight: 600; font-size: 14px; }
+  .rec .why { font-size: 12px; color: #64748b; }
+  .rec .price { font-weight: 600; white-space: nowrap; }
+  .feed { max-height: 420px; overflow-y: auto; }
+  .event { padding: 7px 0; border-top: 1px solid #f1f5f9; font-size: 14px; }
+  .event:first-child { border-top: none; }
+  .event .t { color: #94a3b8; font-size: 12px; }
+  .pill { display: inline-block; font-size: 11px; border-radius: 999px; padding: 1px 8px; margin-left: 6px; background: #f1f5f9; }
+  .pill.purchase { background: #dcfce7; color: #166534; }
+  .pill.cart { background: #fef9c3; color: #854d0e; }
+  #status { font-size: 13px; color: #64748b; margin-top: 8px; }
+  @media (max-width: 800px) { .metrics { grid-template-columns: 1fr 1fr; } .grid { grid-template-columns: 1fr; } }
+</style>
+</head>
+<body>
+<header>
+  <div>
+    <h1>Streaming Recommendation Engine</h1>
+    <p>Simulated live event stream &middot; hybrid recommender (item-item collaborative filtering + trending fallback)</p>
+  </div>
+  <span id="liveBadge" class="badge">● LIVE</span>
+</header>
+<main>
+  <div class="metrics">
+    <div class="metric"><div class="label">Events / sec</div><div class="value" id="mEps">–</div></div>
+    <div class="metric"><div class="label">Total events processed</div><div class="value" id="mTotal">–</div></div>
+    <div class="metric"><div class="label">Last model update</div><div class="value" id="mUpdate" style="font-size:18px">–</div></div>
+    <div class="metric"><div class="label">Users &middot; Catalog</div><div class="value" id="mUsers">–</div></div>
+  </div>
+
+  <div class="panel">
+    <h2>Stream controls</h2>
+    <div class="controls">
+      <div><label>&nbsp;</label><button id="pauseBtn">Pause stream</button></div>
+      <div><label>Speed</label>
+        <select id="speedSel">
+          <option value="0.5">0.5x</option>
+          <option value="1" selected>1x</option>
+          <option value="2">2x</option>
+          <option value="4">4x</option>
+        </select>
+      </div>
+      <div><label>Simulate event — user</label><select id="simUser"></select></div>
+      <div><label>Product</label><select id="simProduct"></select></div>
+      <div><label>Action</label>
+        <select id="simAction">
+          <option value="view">view</option>
+          <option value="click">click</option>
+          <option value="add-to-cart">add-to-cart</option>
+          <option value="purchase">purchase</option>
+        </select>
+      </div>
+      <div><label>&nbsp;</label><button id="simBtn">Simulate event</button></div>
+      <div><label>New user name</label><input id="newName" placeholder="e.g. Kabir"></div>
+      <div><label>&nbsp;</label><button id="addUserBtn" class="secondary">Add cold-start user</button></div>
+    </div>
+    <div id="status"></div>
+  </div>
+
+  <div class="grid">
+    <div>
+      <div class="panel">
+        <h2>For you — live recommendations</h2>
+        <div id="userPanels"></div>
+      </div>
+      <div class="panel">
+        <h2>Trending now</h2>
+        <div id="trending"></div>
+      </div>
+    </div>
+    <div class="panel">
+      <h2>Live event feed</h2>
+      <div class="feed" id="feed"></div>
+    </div>
+  </div>
+</main>
+<script>
+  const $ = (id) => document.getElementById(id);
+  let running = true;
+
+  function esc(s) { return String(s).replace(/[&<>"']/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c])); }
+  function timeAgo(ts) {
+    const s = Math.round((Date.now() - ts) / 1000);
+    if (s < 5) return 'just now';
+    if (s < 60) return s + 's ago';
+    return Math.round(s / 60) + 'm ago';
+  }
+  function recHtml(r) {
+    return '<div class="rec"><div><div class="name">' + esc(r.product.name) + '</div>' +
+      '<div class="why">' + esc(r.product.category) + ' &middot; ' + esc(r.reason) + '</div></div>' +
+      '<div class="price">$' + r.product.price + '</div></div>';
+  }
+
+  async function refresh() {
+    try {
+      const [status, metrics, users, trending, events, catalog] = await Promise.all([
+        fetch('/api/status').then((r) => r.json()),
+        fetch('/api/metrics').then((r) => r.json()),
+        fetch('/api/users').then((r) => r.json()),
+        fetch('/api/trending').then((r) => r.json()),
+        fetch('/api/events?limit=40').then((r) => r.json()),
+        fetch('/api/catalog').then((r) => r.json()),
+      ]);
+      running = status.running;
+      $('liveBadge').textContent = running ? '● LIVE' : '❚❚ PAUSED';
+      $('liveBadge').className = 'badge' + (running ? '' : ' paused');
+      $('pauseBtn').textContent = running ? 'Pause stream' : 'Resume stream';
+      $('mEps').textContent = metrics.eventsPerSec;
+      $('mTotal').textContent = metrics.totalEvents;
+      $('mUpdate').textContent = timeAgo(metrics.lastModelUpdate);
+      $('mUsers').textContent = metrics.userCount + ' · ' + metrics.catalogSize;
+
+      // Dropdowns (preserve selection)
+      const uSel = $('simUser'), prevU = uSel.value;
+      uSel.innerHTML = users.map((u) => '<option value="' + u.id + '">' + esc(u.name) + '</option>').join('');
+      if (prevU) uSel.value = prevU;
+      const pSel = $('simProduct'), prevP = pSel.value;
+      pSel.innerHTML = catalog.map((p) => '<option value="' + p.id + '">' + esc(p.name) + '</option>').join('');
+      if (prevP) pSel.value = prevP;
+
+      // Trending
+      $('trending').innerHTML = trending.map(recHtml).join('') || '<p>No events yet.</p>';
+
+      // Event feed
+      $('feed').innerHTML = events.map((e) =>
+        '<div class="event"><b>' + esc(e.userName) + '</b> ' + esc(e.action) + ' <b>' + esc(e.product.name) + '</b>' +
+        '<span class="pill ' + (e.action === 'purchase' ? 'purchase' : e.action === 'add-to-cart' ? 'cart' : '') + '">' + esc(e.action) + '</span>' +
+        '<div class="t">' + timeAgo(e.ts) + '</div></div>').join('');
+
+      // Per-user recommendation panels
+      const recs = await Promise.all(users.map((u) =>
+        fetch('/api/recommendations?userId=' + u.id).then((r) => r.json())));
+      $('userPanels').innerHTML = recs.map((d) =>
+        '<div class="user-card"><h3>' + esc(d.user.name) +
+        (d.coldStart ? '<span class="cold">cold-start</span>' : '') + '</h3>' +
+        d.recommendations.map(recHtml).join('') + '</div>').join('');
+    } catch (err) {
+      $('status').textContent = 'Could not reach server: ' + err.message;
+    }
+  }
+
+  $('pauseBtn').onclick = async () => {
+    await fetch('/api/control', { method: 'POST', headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ action: running ? 'pause' : 'resume' }) });
+    refresh();
+  };
+  $('speedSel').onchange = async (e) => {
+    await fetch('/api/control', { method: 'POST', headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ speed: parseFloat(e.target.value) }) });
+    refresh();
+  };
+  $('simBtn').onclick = async () => {
+    const res = await fetch('/api/simulate', { method: 'POST', headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ userId: $('simUser').value, productId: $('simProduct').value, action: $('simAction').value }) });
+    const d = await res.json();
+    $('status').textContent = res.ok
+      ? 'Simulated ' + d.event.action + ' — recommendations updated.'
+      : 'Error: ' + (d.error || 'simulation failed');
+    refresh();
+  };
+  $('addUserBtn').onclick = async () => {
+    const res = await fetch('/api/users', { method: 'POST', headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ name: $('newName').value }) });
+    const d = await res.json();
+    $('status').textContent = 'New user "' + d.user.name + '" added — cold-start recommendations are the trending items.';
+    $('newName').value = '';
+    refresh();
+  };
+
+  refresh();
+  setInterval(refresh, 1500);
+</script>
+</body>
+</html>
